@@ -1,61 +1,87 @@
 import requests
+import time
+import threading
 from gpiozero import AngularServo, Button
-from signal import pause
-from time import sleep
 
 # --- CONFIGURATION ---
-API_URL = "https://attcam.cc/api/devices/control_divice"
-ROOM_ID = 1  # Ensure this room exists in your database
+BASE_URL = "https://attcam.cc/api/devices"
+ROOM_ID = 1
 
-# Setup Servo (GPIO 18) and Button (GPIO 16)
+# Hardware Setup
 servo = AngularServo(18, min_angle=-90, max_angle=90, min_pulse_width=0.0005, max_pulse_width=0.0025)
 button = Button(16)
 
-# State tracking
+# Global state to prevent unnecessary updates
 is_active = False
 
-def sync_to_server(state):
-    """Sends the hardware state to the Laravel API."""
+def push_to_server(state_str):
+    """Sends local button state to attcam.cc"""
+    url = f"{BASE_URL}/control_divice"
+    payload = {"room_id": ROOM_ID, "type": "door", "state": state_str}
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
     try:
-        payload = {
-            'room_id': ROOM_ID,
-            'type': 'door',
-            'state': state
-        }
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-        
-        response = requests.post(API_URL, json=payload, headers=headers, timeout=5)
-        
-        if response.status_code == 200:
-            print(f"✅ Server Updated: door is {state}")
-        else:
-            print(f"❌ API Error {response.status_code}: {response.text}")
-            
+        requests.post(url, json=payload, headers=headers, timeout=5)
+        print(f"✅ Pushed to Server: {state_str}")
     except Exception as e:
-        print(f"❌ Network Error: {e}")
+        print(f"❌ Push Error: {e}")
 
-def toggle_servo():
+def check_server_status():
+    """Reads status from attcam.cc/api/devices/1/status"""
     global is_active
+    url = f"{BASE_URL}/{ROOM_ID}/status"
+    headers = {"Accept": "application/json"}
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json().get('data', [])
+            # Find the 'door' device in the list
+            for device in data:
+                if device['type'] == 'door':
+                    server_state = device['state']
+                    
+                    # If the server is different from local, update hardware
+                    if server_state == 'on' and not is_active:
+                        print("🌐 Web Command: Turning ON")
+                        servo.angle = 90
+                        is_active = True
+                    elif server_state == 'off' and is_active:
+                        print("🌐 Web Command: Turning OFF")
+                        servo.angle = -90
+                        is_active = False
+    except Exception as e:
+        print(f"❌ Polling Error: {e}")
+
+def handle_button_press():
+    """Toggles hardware locally and pushes to server"""
+    global is_active
+    is_active = not is_active
     
-    if is_active:
-        print("Button Pressed: Turning OFF (Moving to -90)")
-        servo.angle = -90
-        is_active = False
-        sync_to_server('off') # Sync 'off' to attcam.cc
-    else:
-        print("Button Pressed: Turning ON (Moving to 90)")
-        servo.angle = 90
-        is_active = True
-        sync_to_server('on') # Sync 'on' to attcam.cc
-        
-    # Small sleep to prevent accidental double-clicks (Debounce)
-    sleep(0.5)
+    state_str = "on" if is_active else "off"
+    servo.angle = 90 if is_active else -90
+    print(f"🔘 Button Pressed: {state_str}")
+    
+    # Push this change to the API immediately
+    push_to_server(state_str)
 
-# Link the physical button to the function
-button.when_pressed = toggle_servo
+# Link the physical button
+button.when_pressed = handle_button_press
 
-print("System Ready. Controlling 'door' on attcam.cc via GPIO 16/18.")
-pause()
+def polling_loop():
+    """Background loop to check server every 3 seconds"""
+    while True:
+        check_server_status()
+        time.sleep(3)
+
+# Start Polling in a background thread
+poll_thread = threading.Thread(target=polling_loop, daemon=True)
+poll_thread.start()
+
+print("🚀 System Online at attcam.cc")
+print("Listening for button presses and web commands...")
+
+# Keep main thread alive
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("Stopping system...")
