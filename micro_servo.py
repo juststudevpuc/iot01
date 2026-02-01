@@ -1,87 +1,92 @@
 import requests
 import time
 import threading
-from gpiozero import AngularServo, Button
+from gpiozero import AngularServo, LED, Button
 
-# --- CONFIGURATION ---
+# --- SETTINGS ---
+# Using your live URL and updated generic routes
 BASE_URL = "https://attcam.cc/api/devices"
-ROOM_ID = 1
+ROOM_ID = 1  # The ID of the room this Pi is physically in
 
 # Hardware Setup
+# Servo on GPIO 18, LED on GPIO 17, Button on GPIO 16
 servo = AngularServo(18, min_angle=-90, max_angle=90, min_pulse_width=0.0005, max_pulse_width=0.0025)
+light_led = LED(17)
 button = Button(16)
 
-# Global state to prevent unnecessary updates
-is_active = False
+# Global states to track hardware
+door_active = False
 
-def push_to_server(state_str):
-    """Sends local button state to attcam.cc"""
+def sync_to_server(device_type, state_str):
+    """POST local hardware change to attcam.cc"""
     url = f"{BASE_URL}/control_divice"
-    payload = {"room_id": ROOM_ID, "type": "door", "state": state_str}
+    payload = {"room_id": ROOM_ID, "type": device_type, "state": state_str}
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     try:
         requests.post(url, json=payload, headers=headers, timeout=5)
-        print(f"✅ Pushed to Server: {state_str}")
-    except Exception as e:
-        print(f"❌ Push Error: {e}")
+        print(f"📡 Synced to Web: {device_type} is {state_str}")
+    except:
+        print("📡 Sync Failed: Check Internet")
 
-def check_server_status():
-    """Reads status from attcam.cc/api/devices/1/status"""
-    global is_active
-    url = f"{BASE_URL}/{ROOM_ID}/status"
+def poll_status_from_server():
+    """GET status for this room's devices from the generic status endpoint"""
+    global door_active
+    url = f"{BASE_URL}/status?room_id={ROOM_ID}"
     headers = {"Accept": "application/json"}
+    
     try:
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
-            data = response.json().get('data', [])
-            # Find the 'door' device in the list
-            for device in data:
+            devices = response.json().get('data', [])
+            
+            for device in devices:
+                # 1. Update Light
+                if device['type'] == 'light':
+                    if device['state'] == 'on':
+                        light_led.on()
+                    else:
+                        light_led.off()
+
+                # 2. Update Door (Servo)
                 if device['type'] == 'door':
-                    server_state = device['state']
-                    
-                    # If the server is different from local, update hardware
-                    if server_state == 'on' and not is_active:
-                        print("🌐 Web Command: Turning ON")
+                    if device['state'] == 'on' and not door_active:
                         servo.angle = 90
-                        is_active = True
-                    elif server_state == 'off' and is_active:
-                        print("🌐 Web Command: Turning OFF")
+                        door_active = True
+                    elif device['state'] == 'off' and door_active:
                         servo.angle = -90
-                        is_active = False
+                        door_active = False
     except Exception as e:
-        print(f"❌ Polling Error: {e}")
+        print(f"polling error: {e}")
 
-def handle_button_press():
-    """Toggles hardware locally and pushes to server"""
-    global is_active
-    is_active = not is_active
+def handle_physical_button():
+    """Manual override: Toggles the door locally and pushes update to web"""
+    global door_active
+    door_active = not door_active
     
-    state_str = "on" if is_active else "off"
-    servo.angle = 90 if is_active else -90
-    print(f"🔘 Button Pressed: {state_str}")
+    state_str = "on" if door_active else "off"
+    servo.angle = 90 if door_active else -90
+    print(f"🔘 Button Pressed: Door is {state_str}")
     
-    # Push this change to the API immediately
-    push_to_server(state_str)
+    # Push to API so the website switch flips automatically
+    sync_to_server('door', state_str)
 
-# Link the physical button
-button.when_pressed = handle_button_press
+# Event listener for physical button
+button.when_pressed = handle_physical_button
 
-def polling_loop():
-    """Background loop to check server every 3 seconds"""
+def background_loop():
+    """Runs polling in the background every 3 seconds"""
     while True:
-        check_server_status()
+        poll_status_from_server()
         time.sleep(3)
 
-# Start Polling in a background thread
-poll_thread = threading.Thread(target=polling_loop, daemon=True)
-poll_thread.start()
+# Start background thread
+thread = threading.Thread(target=background_loop, daemon=True)
+thread.start()
 
-print("🚀 System Online at attcam.cc")
-print("Listening for button presses and web commands...")
+print(f"🚀 Raspberry Pi Online: Monitoring Room {ROOM_ID} on attcam.cc")
 
-# Keep main thread alive
 try:
     while True:
         time.sleep(1)
 except KeyboardInterrupt:
-    print("Stopping system...")
+    print("Shutting down...")
