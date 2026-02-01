@@ -1,59 +1,49 @@
 import requests
-import time
-import RPi.GPIO as GPIO
+from gpiozero import AngularServo, Button
+from signal import pause
+from time import sleep
 
-# Configuration
-BASE_URL = "https://attcam.cc/api/devices"
-CONTROL_URL = f"{BASE_URL}/control_divice"
-STATUS_URL = f"{BASE_URL}/1/status"  # Room 1
+# --- CONFIGURATION ---
+API_URL = "https://attcam.cc/api/devices/control_divice"
+ROOM_ID = 1  # Change to your actual room ID
 
-# GPIO Pins
-LIGHT_PIN = 17
-BUTTON_PIN = 22 # Physical button for light
+# Servo and Button Setup
+servo = AngularServo(18, min_angle=-90, max_angle=90, min_pulse_width=0.0005, max_pulse_width=0.0025)
+button = Button(16)
 
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(LIGHT_PIN, GPIO.OUT)
-GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP) # Pull-up for button
+is_active = False
 
-def toggle_light_locally(channel):
-    """ Triggered when physical button is pressed """
-    current_state = GPIO.input(LIGHT_PIN)
-    new_state = "off" if current_state == 1 else "on"
-    
-    # 1. Flip hardware
-    GPIO.output(LIGHT_PIN, not current_state)
-    
-    # 2. Sync to Server
+def sync_to_server(state):
+    """Sends the new state to Laravel"""
     try:
-        payload = {'room_id': 1, 'type': 'light', 'state': new_state}
-        requests.post(CONTROL_URL, data=payload, timeout=5)
-        print(f"Button Pressed: Light synced to {new_state} on attcam.cc")
-    except Exception as e:
-        print("Failed to sync button press to server")
-
-# Add Event Listener for the physical button
-GPIO.add_event_detect(BUTTON_PIN, GPIO.FALLING, callback=toggle_light_locally, bouncetime=300)
-
-def sync_from_server():
-    """ Keeps hardware in sync with what users click on the website """
-    try:
-        response = requests.get(STATUS_URL, timeout=5)
+        payload = {
+            'room_id': ROOM_ID,
+            'type': 'door',  # Since you use a servo for the door
+            'state': state
+        }
+        response = requests.post(API_URL, data=payload, timeout=5)
         if response.status_code == 200:
-            devices = response.json().get('data', [])
-            for dev in devices:
-                if dev['type'] == 'light':
-                    server_state = GPIO.HIGH if dev['state'] == 'on' else GPIO.LOW
-                    # Only update if the server differs from local to avoid flickering
-                    if GPIO.input(LIGHT_PIN) != server_state:
-                        GPIO.output(LIGHT_PIN, server_state)
+            print(f"Successfully synced '{state}' to attcam.cc")
     except Exception as e:
-        pass
+        print(f"Failed to sync with server: {e}")
 
-# Main Loop
-try:
-    print("System Running: Control via Button or attcam.cc")
-    while True:
-        sync_from_server()
-        time.sleep(1) # Poll every second
-except KeyboardInterrupt:
-    GPIO.cleanup()
+def toggle_servo():
+    global is_active
+    
+    if is_active:
+        print("Click: Turning OFF (Moving to -90)")
+        servo.angle = -90
+        is_active = False
+        sync_to_server('off')
+    else:
+        print("Click: Turning ON (Moving to 90)")
+        servo.angle = 90
+        is_active = True
+        sync_to_server('on')
+        
+    sleep(0.5) # Debounce
+
+button.when_pressed = toggle_servo
+
+print("System Ready. Controlling 'door' on attcam.cc via Pin 16.")
+pause()
