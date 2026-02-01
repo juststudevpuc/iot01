@@ -10,20 +10,12 @@ BASE_URL = "https://attcam.cc/api/devices"
 ROOM_ID = 1 
 
 # --- HARDWARE SETUP ---
-# Servo on GPIO 18
 servo = AngularServo(18, min_angle=-90, max_angle=90, min_pulse_width=0.0005, max_pulse_width=0.0025)
-
-# LED on GPIO 19
 light_led = LED(19)
-
-# Door Button on GPIO 16
 door_button = Button(16)
-
-# Light Button on GPIO 21 (Pin 40)
 light_button = Button(21)
 
-# Sensor on GPIO 23 (Pin 16)
-# Note: If using white DHT22, change DHT11 to DHT22 below
+# Sensor on GPIO 23
 try:
     dht_device = adafruit_dht.DHT11(board.D23)
 except Exception as e:
@@ -34,38 +26,31 @@ door_active = False
 light_active = False
 
 print("System Online.")
-print("controls: Door(16) | Light(21)")
-print("Sensor:   Temp/Hum(23)")
+print("Controls: Door(16) | Light(21)")
+print("Sensor:   Temp/Hum(23) - Updates every 30s")
 
 # --- API FUNCTIONS ---
 def sync_control(device_type, state_str):
-    """Updates the server when you click a physical button"""
     url = f"{BASE_URL}/control_divice"
     payload = {"room_id": ROOM_ID, "type": device_type, "state": state_str}
     try:
         requests.post(url, json=payload, timeout=2)
-        print(f"📡 Sync: {device_type} is now {state_str}")
+        print(f"📡 Sync: {device_type} -> {state_str}")
     except:
-        print(f"⚠️ Sync Failed (Internet?)")
+        print(f"⚠️ Sync Failed")
 
 def upload_sensor(temp, hum):
-    """Uploads Temperature and Humidity to the server"""
     url = f"{BASE_URL}/control_divice"
     try:
-        # Send Temperature
-        payload_t = {"room_id": ROOM_ID, "type": "temperature", "state": str(temp)}
-        requests.post(url, json=payload_t, timeout=2)
-        
-        # Send Humidity
-        payload_h = {"room_id": ROOM_ID, "type": "humidity", "state": str(hum)}
-        requests.post(url, json=payload_h, timeout=2)
-        
-        print(f"☁️ Uploaded: {temp}°C | {hum}%")
+        # Upload Temp
+        requests.post(url, json={"room_id": ROOM_ID, "type": "temperature", "state": str(temp)}, timeout=2)
+        # Upload Hum
+        requests.post(url, json={"room_id": ROOM_ID, "type": "humidity", "state": str(hum)}, timeout=2)
+        print(f"☁️ Uploaded Data to Web")
     except:
         print("⚠️ Sensor Upload Failed")
 
 def poll_server():
-    """Checks website for remote commands"""
     global door_active, light_active
     url = f"{BASE_URL}/status?room_id={ROOM_ID}"
     try:
@@ -73,27 +58,25 @@ def poll_server():
         if response.status_code == 200:
             devices = response.json().get('data', [])
             for device in devices:
-                # Sync Light
                 if device['type'] == 'light':
                     if device['state'] == 'on' and not light_active:
                         light_led.on(); light_active = True
-                        print("📱 Web turned Light ON")
+                        print("📱 Web: Light ON")
                     elif device['state'] == 'off' and light_active:
                         light_led.off(); light_active = False
-                        print("📱 Web turned Light OFF")
+                        print("📱 Web: Light OFF")
 
-                # Sync Door
                 if device['type'] == 'door':
                     if device['state'] == 'on' and not door_active:
                         servo.angle = 90; door_active = True
-                        print("📱 Web OPENED Door")
+                        print("📱 Web: OPEN Door")
                     elif device['state'] == 'off' and door_active:
                         servo.angle = -90; door_active = False
-                        print("📱 Web CLOSED Door")
+                        print("📱 Web: CLOSE Door")
     except:
         pass
 
-# --- BUTTON FUNCTIONS ---
+# --- BUTTON CONTROLS ---
 def toggle_door():
     global door_active
     door_active = not door_active
@@ -117,33 +100,35 @@ light_button.when_pressed = toggle_light
 # --- BACKGROUND LOOP ---
 def background_task():
     last_sensor_time = 0
+    
     while True:
-        # 1. Check Web Commands (Every 2 seconds)
+        # 1. Check Web Commands (Fast: Every 2 seconds)
         poll_server()
         
-        # 2. Read Sensor (Every 10 seconds)
-        # We wait 10s because DHT sensors are slow and can crash if read too fast
-        if time.time() - last_sensor_time > 10:
+        # 2. Check Sensor (Slow: Every 30 seconds)
+        # We use '30' here as requested
+        if time.time() - last_sensor_time > 30:
             try:
                 t = dht_device.temperature
                 h = dht_device.humidity
                 if t is not None:
-                    print(f"🌡️ Room Temp: {t}°C") # Print to screen as requested
+                    print(f"--------------------------------")
+                    print(f"🌡️ Room Temp: {t}°C")
+                    print(f"💧 Humidity:  {h}%")
+                    print(f"--------------------------------")
                     upload_sensor(t, h)
                     last_sensor_time = time.time()
             except RuntimeError:
-                # Sensor reading failed this time (normal), just skip
-                pass
+                pass # Sensor just missed a read, try again next loop
             except Exception as e:
                 print(f"Sensor Error: {e}")
                 
         time.sleep(2)
 
-# Start the background thread
+# Start background thread
 thread = threading.Thread(target=background_task, daemon=True)
 thread.start()
 
-# Keep main program alive
 try:
     while True:
         time.sleep(1)
