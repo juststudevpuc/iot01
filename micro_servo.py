@@ -51,7 +51,7 @@ def move_servo_smoothly(target_angle):
         # 0.03 = Normal speed
         # 0.06 = Calm/Slow (Recommended)
         # 0.10 = Very Slow
-        time.sleep(0.06) 
+        time.sleep(0.02) 
         
     current_servo_angle = target_angle
 
