@@ -37,17 +37,21 @@ print("Sensor:   Temp/Hum(23)")
 def move_servo_smoothly(target_angle):
     global current_servo_angle
     
-    # Decide if we go UP (+1) or DOWN (-1)
+    # Decide direction
     if target_angle > current_servo_angle:
-        step = 1
+        step = 1   # Opening
     else:
-        step = -1
+        step = -1  # Closing
         
-    # Loop from current to target
-    # range(start, stop, step)
+    # Loop to move 1 degree at a time
     for angle in range(int(current_servo_angle), int(target_angle) + step, step):
         servo.angle = angle
-        time.sleep(0.03) # <--- CHANGE THIS SPEED (0.01 is fast, 0.1 is very slow)
+        
+        # --- CALM SPEED SETTING ---
+        # 0.03 = Normal speed
+        # 0.06 = Calm/Slow (Recommended)
+        # 0.10 = Very Slow
+        time.sleep(0.06) 
         
     current_servo_angle = target_angle
 
