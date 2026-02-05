@@ -10,10 +10,7 @@ BASE_URL = "https://attcam.cc/api/devices"
 ROOM_ID = 1 
 
 # --- HARDWARE SETUP ---
-# We keep the range -90 to 90 to give us full freedom, 
-# but we will only use 0 to 90 in the logic below.
 servo = AngularServo(18, min_angle=-90, max_angle=90, min_pulse_width=0.0005, max_pulse_width=0.0025)
-
 light_led = LED(19)
 door_button = Button(16)
 light_button = Button(21)
@@ -27,10 +24,32 @@ except Exception as e:
 # Global states
 door_active = False
 light_active = False
+current_servo_angle = 0 # Remember where the door is
+
+# Initialize Door to Closed (0)
+servo.angle = 0
 
 print("System Online.")
 print("Controls: Door(16) | Light(21)")
 print("Sensor:   Temp/Hum(23)")
+
+# --- NEW: SMOOTH MOVE FUNCTION ---
+def move_servo_smoothly(target_angle):
+    global current_servo_angle
+    
+    # Decide if we go UP (+1) or DOWN (-1)
+    if target_angle > current_servo_angle:
+        step = 1
+    else:
+        step = -1
+        
+    # Loop from current to target
+    # range(start, stop, step)
+    for angle in range(int(current_servo_angle), int(target_angle) + step, step):
+        servo.angle = angle
+        time.sleep(0.03) # <--- CHANGE THIS SPEED (0.01 is fast, 0.1 is very slow)
+        
+    current_servo_angle = target_angle
 
 # --- API FUNCTIONS ---
 def sync_control(device_type, state_str):
@@ -68,16 +87,16 @@ def poll_server():
                         light_led.off(); light_active = False
                         print("📱 Web: Light OFF")
 
-                # --- DOOR CONTROL (UPDATED 0 to 90) ---
+                # --- DOOR CONTROL (SMOOTH) ---
                 if device['type'] == 'door':
                     if device['state'] == 'on' and not door_active:
-                        servo.angle = 90  # OPEN
+                        print("📱 Web: OPENING Door...")
+                        move_servo_smoothly(90) # OPEN
                         door_active = True
-                        print("📱 Web: OPEN Door (90°)")
                     elif device['state'] == 'off' and door_active:
-                        servo.angle = 0   # CLOSED
+                        print("📱 Web: CLOSING Door...")
+                        move_servo_smoothly(0)  # CLOSE
                         door_active = False
-                        print("📱 Web: CLOSE Door (0°)")
     except:
         pass
 
@@ -86,15 +105,15 @@ def toggle_door():
     global door_active
     door_active = not door_active
     
-    # --- UPDATED ANGLES HERE ---
     if door_active:
-        servo.angle = 90  # Open position
+        print("🔘 Button: OPENING...")
+        move_servo_smoothly(90)
         state = "on"
     else:
-        servo.angle = 0   # Closed position (Real door style)
+        print("🔘 Button: CLOSING...")
+        move_servo_smoothly(0)
         state = "off"
         
-    print(f"🔘 Door Button: {state}")
     sync_control('door', state)
 
 def toggle_light():
