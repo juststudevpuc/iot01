@@ -60,27 +60,38 @@ def sync_to_web(state_str):
 
 # --- 4. CORE DOOR LOGIC ---
 
+# --- 4. CORE DOOR LOGIC ---
+
+# Add this variable at the top with your other globals
+auto_close_timer = None 
+
 def open_door():
-    global door_active
+    global door_active, auto_close_timer
     if not door_active:
         print("🔓 Opening Door...")
         move_servo_smoothly(90)
         door_active = True
         sync_to_web("on")
+        
+        # --- NEW: Start 10-second Auto-Close Timer ---
+        if auto_close_timer is not None:
+            auto_close_timer.cancel() # Reset timer if it was already running
+        
+        auto_close_timer = threading.Timer(10.0, close_door)
+        auto_close_timer.start()
+        print("⏰ Auto-close timer started: 10 seconds")
 
 def close_door():
-    global door_active
+    global door_active, auto_close_timer
     if door_active:
+        # Cancel timer if door is closed manually before 10 seconds
+        if auto_close_timer is not None:
+            auto_close_timer.cancel()
+            
         print("🔒 Closing Door...")
         move_servo_smoothly(0)
         door_active = False
         sync_to_web("off")
-
-def toggle_door():
-    if door_active:
-        close_door()
-    else:
-        open_door()
 
 # Button Event (Pin 36)
 door_button.when_pressed = toggle_door
