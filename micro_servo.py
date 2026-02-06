@@ -42,7 +42,7 @@ def move_servo_smoothly(target_angle):
     
     for angle in range(start, end, step):
         servo.angle = angle
-        time.sleep(0.06) 
+        time.sleep(0.02) 
     current_servo_angle = target_angle
 
 def sync_to_web(device_type, state_str):
@@ -67,7 +67,7 @@ def open_door():
         # Auto-Close Timer
         if auto_close_timer:
             auto_close_timer.cancel()
-        auto_close_timer = threading.Timer(10.0, close_door)
+        auto_close_timer = threading.Timer(0.5, close_door)
         auto_close_timer.start()
 
 def close_door():
