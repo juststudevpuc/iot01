@@ -6,7 +6,7 @@ from gpiozero import AngularServo, LED, Button
 from mfrc522 import SimpleMFRC522  # <--- NEW LIBRARY
 
 # --- SETTINGS ---
-VALID_CARD_ID = 8473294822  # <--- 🔴 REPLACE THIS WITH YOUR ID
+VALID_CARD_ID = 1047716761031  # <--- 🔴 REPLACE THIS WITH YOUR ID
 ROOM_ID = 1 
 
 # --- HARDWARE SETUP ---
