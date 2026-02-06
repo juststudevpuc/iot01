@@ -67,7 +67,7 @@ def open_door():
         # Auto-Close Timer
         if auto_close_timer:
             auto_close_timer.cancel()
-        auto_close_timer = threading.Timer(12.0, close_door)
+        auto_close_timer = threading.Timer(10.0, close_door)
         auto_close_timer.start()
 
 def close_door():
