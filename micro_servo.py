@@ -10,13 +10,15 @@ ROOM_ID = 1
 BASE_URL = "https://attcam.cc/api/devices"
 
 # --- 2. HARDWARE SETUP ---
-# Servo: min=-90, max=90
 servo = AngularServo(18, min_angle=90, max_angle=-90, min_pulse_width=0.0005, max_pulse_width=0.0025)
 
-# Button on Pin 36 (GPIO 16)
+# DOOR Button -> Pin 36 (GPIO 16)
 door_button = Button(16) 
 
-# Light on Pin 35 (GPIO 19)
+# LIGHT Button -> Pin 37 (GPIO 26) [NEW!]
+light_button = Button(26)
+
+# Light LED -> Pin 35 (GPIO 19)
 light_led = LED(19)
 
 # RFID Reader
@@ -54,8 +56,9 @@ def sync_to_web(device_type, state_str):
     except:
         print("⚠️ Web Sync Failed")
 
-# --- 4. CORE DOOR LOGIC ---
+# --- 4. CORE LOGIC ---
 
+# --- DOOR LOGIC ---
 def open_door():
     global door_active, auto_close_timer
     if not door_active:
@@ -64,7 +67,6 @@ def open_door():
         door_active = True
         sync_to_web("door", "on")
         
-        # Auto-Close Timer
         if auto_close_timer:
             auto_close_timer.cancel()
         auto_close_timer = threading.Timer(10.0, close_door)
@@ -84,7 +86,17 @@ def toggle_door():
     if door_active: close_door()
     else: open_door()
 
+# --- LIGHT LOGIC [NEW] ---
+def toggle_light():
+    light_led.toggle() # Switches On/Off
+    state = "on" if light_led.is_lit else "off"
+    print(f"💡 Button: Light {state}")
+    # Run web sync in background so button doesn't freeze
+    threading.Thread(target=sync_to_web, args=("light", state)).start()
+
+# Link Buttons to Functions
 door_button.when_pressed = toggle_door
+light_button.when_pressed = toggle_light  # [NEW]
 
 # --- 5. BACKGROUND THREADS ---
 
@@ -121,7 +133,7 @@ def web_poll_loop():
                         elif dev['state'] == 'off' and door_active:
                             close_door()
                     
-                    # LIGHT Check (Added Back)
+                    # LIGHT Check
                     elif dev['type'] == 'light':
                         if dev['state'] == 'on' and not light_led.is_lit:
                             print("💡 Web: Light ON")
